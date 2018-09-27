@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.annotation.{JsonDeserialize, JsonSerialize
 import org.apache.spark.JobExecutionStatus
 import org.apache.spark.executor.ExecutorMetrics
 import org.apache.spark.metrics.ExecutorMetricType
+import org.apache.spark.scheduler.Pool
 
 case class ApplicationInfo private[spark](
     id: String,
@@ -347,7 +348,8 @@ class ApplicationEnvironmentInfo private[spark] (
     val runtime: RuntimeInfo,
     val sparkProperties: Seq[(String, String)],
     val systemProperties: Seq[(String, String)],
-    val classpathEntries: Seq[(String, String)])
+    val classpathEntries: Seq[(String, String)],
+    val poolInformation: Map[String, Pool])
 
 class RuntimeInfo private[spark](
     val javaVersion: String,

@@ -35,10 +35,15 @@ private[ui] class PoolPage(parent: StagesTab) extends WebUIPage("pool") {
     }.getOrElse {
       throw new IllegalArgumentException(s"Missing poolname parameter")
     }
-
-    // For now, pool information is only accessible in live UIs
-    val pool = parent.sc.flatMap(_.getPoolForName(poolName)).getOrElse {
-      throw new IllegalArgumentException(s"Unknown pool: $poolName")
+    // SPARK-25392 if SC is not present then take the pool info from store
+    val pool = if (parent.sc.isDefined) {
+      parent.sc.flatMap(_.getPoolForName(poolName)).getOrElse {
+        throw new IllegalArgumentException(s"Unknown pool: $poolName")
+      }
+    } else {
+      parent.store.environmentInfo.poolInformation.getOrElse(poolName,
+        throw new IllegalArgumentException(s"Unknown pool: $poolName")
+      )
     }
 
     val uiPool = parent.store.asOption(parent.store.pool(poolName)).getOrElse(

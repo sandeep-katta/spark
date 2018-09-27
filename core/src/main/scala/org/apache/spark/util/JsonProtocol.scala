@@ -173,11 +173,13 @@ private[spark] object JsonProtocol {
     val sparkProperties = mapToJson(environmentDetails("Spark Properties").toMap)
     val systemProperties = mapToJson(environmentDetails("System Properties").toMap)
     val classpathEntries = mapToJson(environmentDetails("Classpath Entries").toMap)
+    val poolInformation = mapToJson(environmentDetails("Pool Information").toMap)
     ("Event" -> SPARK_LISTENER_EVENT_FORMATTED_CLASS_NAMES.environmentUpdate) ~
     ("JVM Information" -> jvmInformation) ~
     ("Spark Properties" -> sparkProperties) ~
     ("System Properties" -> systemProperties) ~
-    ("Classpath Entries" -> classpathEntries)
+    ("Classpath Entries" -> classpathEntries) ~
+    ("Pool Information" -> poolInformation)
   }
 
   def blockManagerAddedToJson(blockManagerAdded: SparkListenerBlockManagerAdded): JValue = {
@@ -657,7 +659,8 @@ private[spark] object JsonProtocol {
       "JVM Information" -> mapFromJson(json \ "JVM Information").toSeq,
       "Spark Properties" -> mapFromJson(json \ "Spark Properties").toSeq,
       "System Properties" -> mapFromJson(json \ "System Properties").toSeq,
-      "Classpath Entries" -> mapFromJson(json \ "Classpath Entries").toSeq)
+      "Classpath Entries" -> mapFromJson(json \ "Classpath Entries").toSeq,
+      "Pool Information" -> mapFromJson(json \ "Pool Information").toSeq)
     SparkListenerEnvironmentUpdate(environmentDetails)
   }
 
@@ -1072,8 +1075,11 @@ private[spark] object JsonProtocol {
    * --------------------------------- */
 
   def mapFromJson(json: JValue): Map[String, String] = {
-    val jsonFields = json.asInstanceOf[JObject].obj
-    jsonFields.map { case JField(k, JString(v)) => (k, v) }.toMap
+    // SPARK-25392 To ensure backward compatibility
+    jsonOption(json).map { value =>
+      val jsonFields = value.asInstanceOf[JObject].obj
+      jsonFields.map { case JField(k, JString(v)) => (k, v) }.toMap
+    }.getOrElse(Map.empty)
   }
 
   def propertiesFromJson(json: JValue): Properties = {

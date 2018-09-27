@@ -23,6 +23,7 @@ import java.util.function.Function
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.HashMap
+import scala.xml.XML
 
 import org.apache.spark._
 import org.apache.spark.executor.{ExecutorMetrics, TaskMetrics}
@@ -141,12 +142,22 @@ private[spark] class AppStatusListener(
       jvmInfo.get("Java Version").orNull,
       jvmInfo.get("Java Home").orNull,
       jvmInfo.get("Scala Version").orNull)
+    val poolInfoMap = details.getOrElse("Pool Information", Seq.empty).map(poolInfo => {
+      val xml = XML.loadString(poolInfo._2)
+      val pool = new Pool(
+        (xml \\ "@PoolName").toString,
+        SchedulingMode.withName((xml \\ "@SchedulingMode").toString),
+        (xml \\ "@MinimumShare").toString.toInt,
+        (xml \\ "@PoolWeight").toString.toInt)
+      (poolInfo._1 -> pool)
+    }).toMap
 
     val envInfo = new v1.ApplicationEnvironmentInfo(
       runtime,
       details.getOrElse("Spark Properties", Nil),
       details.getOrElse("System Properties", Nil),
-      details.getOrElse("Classpath Entries", Nil))
+      details.getOrElse("Classpath Entries", Nil),
+      poolInfoMap)
 
     coresPerTask = envInfo.sparkProperties.toMap.get("spark.task.cpus").map(_.toInt)
       .getOrElse(coresPerTask)

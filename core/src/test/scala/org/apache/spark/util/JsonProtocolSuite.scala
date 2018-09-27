@@ -63,11 +63,15 @@ class JsonProtocolSuite extends SparkFunSuite {
       SparkListenerJobStart(10, jobSubmissionTime, stageInfos, properties)
     }
     val jobEnd = SparkListenerJobEnd(20, jobCompletionTime, JobSucceeded)
+    val defaultPool =
+      " <pool> <item PoolName='default' MinimumShare='2' PoolWeight='3' " +
+        "SchedulingMode='FIFO'/> </pool> "
     val environmentUpdate = SparkListenerEnvironmentUpdate(Map[String, Seq[(String, String)]](
       "JVM Information" -> Seq(("GC speed", "9999 objects/s"), ("Java home", "Land of coffee")),
       "Spark Properties" -> Seq(("Job throughput", "80000 jobs/s, regardless of job type")),
       "System Properties" -> Seq(("Username", "guest"), ("Password", "guest")),
-      "Classpath Entries" -> Seq(("Super library", "/tmp/super_library"))
+      "Classpath Entries" -> Seq(("Super library", "/tmp/super_library")),
+      "Pool Information" -> Seq(("default", defaultPool))
     ))
     val blockManagerAdded = SparkListenerBlockManagerAdded(1L,
       BlockManagerId("Stars", "In your multitude...", 300), 500)
@@ -466,6 +470,35 @@ class JsonProtocolSuite extends SparkFunSuite {
     // For anything else, we just cast the value to a string
     testAccumValue(Some("anything"), blocks, JString(blocks.toString))
     testAccumValue(Some("anything"), 123, JString("123"))
+  }
+
+  test("SPARK-25392 Parse event without Pool Information to ensure backward compatability") {
+    val jsonWithoutPoolInfo = parse(
+    """
+      |{
+      |  "Event": "SparkListenerEnvironmentUpdate",
+      |  "JVM Information": {
+      |    "GC speed": "9999 objects/s",
+      |    "Java home": "Land of coffee"
+      |  },
+      |  "Spark Properties": {
+      |    "Job throughput": "80000 jobs/s, regardless of job type"
+      |  },
+      |  "System Properties": {
+      |    "Username": "guest",
+      |    "Password": "guest"
+      |  },
+      |  "Classpath Entries": {
+      |    "Super library": "/tmp/super_library"
+      |  }
+      |}
+    """.stripMargin)
+    JsonProtocol.sparkEventFromJson(jsonWithoutPoolInfo) match {
+      case SparkListenerEnvironmentUpdate(details) =>
+        assert(details("Pool Information").isEmpty)
+        assert(details("System Properties").toMap.getOrElse("Username", "undefined").equals("guest"))
+      case _ => assert(false)
+    }
   }
 }
 
@@ -1759,6 +1792,9 @@ private[spark] object JsonProtocolSuite extends Assertions {
       |  },
       |  "Classpath Entries": {
       |    "Super library": "/tmp/super_library"
+      |  },
+      |  "Pool Information": {
+      |  "default" : " <pool> <item PoolName='default' MinimumShare='2' PoolWeight='3' SchedulingMode='FIFO'/> </pool> "
       |  }
       |}
     """.stripMargin

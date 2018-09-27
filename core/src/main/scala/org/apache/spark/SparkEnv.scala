@@ -400,16 +400,18 @@ object SparkEnv extends Logging {
   }
 
   /**
-   * Return a map representation of jvm information, Spark properties, system properties, and
-   * class paths. Map keys define the category, and map values represent the corresponding
-   * attributes as a sequence of KV pairs. This is used mainly for SparkListenerEnvironmentUpdate.
+   * Return a map representation of jvm information, Spark properties, system properties,
+   * class paths and pool Information. Map keys define the category, and map values represent the
+   * corresponding attributes as a sequence of KV pairs.
+   * This is used mainly for SparkListenerEnvironmentUpdate.
    */
   private[spark]
   def environmentDetails(
       conf: SparkConf,
       schedulingMode: String,
       addedJars: Seq[String],
-      addedFiles: Seq[String]): Map[String, Seq[(String, String)]] = {
+      addedFiles: Seq[String],
+      poolInformation: Seq[(String, String)]): Map[String, Seq[(String, String)]] = {
 
     import Properties._
     val jvmInformation = Seq(
@@ -446,6 +448,7 @@ object SparkEnv extends Logging {
       "JVM Information" -> jvmInformation,
       "Spark Properties" -> sparkProperties,
       "System Properties" -> otherProperties,
-      "Classpath Entries" -> classPaths)
+      "Classpath Entries" -> classPaths,
+      "Pool Information" -> poolInformation)
   }
 }

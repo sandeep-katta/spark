@@ -22,12 +22,15 @@ import java.util.concurrent.{ConcurrentHashMap, ConcurrentLinkedQueue}
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 
 /**
  * A Schedulable entity that represents collection of Pools or TaskSetManagers
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 private[spark] class Pool(
     val poolName: String,
     val schedulingMode: SchedulingMode,

@@ -34,7 +34,8 @@ import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster._
 import org.apache.spark.status.api.v1
 import org.apache.spark.storage._
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{JsonProtocol, Utils}
+import org.json4s.jackson.JsonMethods.parse
 
 class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
@@ -64,6 +65,11 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
   test("environment info") {
     val listener = new AppStatusListener(store, conf, true)
 
+    val defaultPool =
+      " <pool> <item PoolName=\"default\" MinimumShare=\"2\" PoolWeight=\"3\" SchedulingMode=\"FIFO\"/> </pool> "
+
+    val customPool =
+      "<pool> <item PoolName=\"customPool\" MinimumShare=\"3\" PoolWeight=\"4\" SchedulingMode=\"FAIR\"/> </pool>"
     val details = Map(
       "JVM Information" -> Seq(
         "Java Version" -> sys.props("java.version"),
@@ -81,6 +87,10 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
       "Classpath Entries" -> Seq(
         "/jar1" -> "System",
         "/jar2" -> "User"
+      ),
+      "Pool Information" -> Seq(
+        "default" -> defaultPool,
+        "customPool" -> customPool
       )
     )
 
@@ -98,6 +108,10 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
       assert(info.sparkProperties === details("Spark Properties"))
       assert(info.systemProperties === details("System Properties"))
       assert(info.classpathEntries === details("Classpath Entries"))
+      val def_pool = info.poolInformation("default")
+      val cus_pool = info.poolInformation("customPool")
+      assert(def_pool.name.equals("default") && def_pool.schedulingMode == SchedulingMode.FIFO)
+      assert(cus_pool.name.equals("customPool") && cus_pool.schedulingMode == SchedulingMode.FAIR)
     }
   }
 
@@ -1414,6 +1428,39 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
             assert(false)
         }
       }
+    }
+  }
+
+  test("SPARK-25392 environment info with empty Pool Information using Json") {
+    val listener = new AppStatusListener(store, conf, true)
+    val jsonWithoutPoolInfo = parse(
+      """
+        |{
+        |  "Event": "SparkListenerEnvironmentUpdate",
+        |  "JVM Information": {
+        |    "GC speed": "9999 objects/s",
+        |    "Java home": "Land of coffee"
+        |  },
+        |  "Spark Properties": {
+        |    "Job throughput": "80000 jobs/s, regardless of job type"
+        |  },
+        |  "System Properties": {
+        |    "Username": "guest",
+        |    "Password": "guest"
+        |  },
+        |  "Classpath Entries": {
+        |    "Super library": "/tmp/super_library"
+        |  }
+        |}
+      """.stripMargin)
+    val envUpdateEvent = JsonProtocol.sparkEventFromJson(jsonWithoutPoolInfo)
+      .asInstanceOf[SparkListenerEnvironmentUpdate]
+    listener.onEnvironmentUpdate(envUpdateEvent)
+    val appEnvKey = classOf[ApplicationEnvironmentInfoWrapper].getName()
+    check[ApplicationEnvironmentInfoWrapper](appEnvKey) { env =>
+      val info = env.info
+      assert(info.sparkProperties === Seq("Job throughput" -> "80000 jobs/s, regardless of job type"))
+      assert(info.poolInformation.isEmpty)
     }
   }
 

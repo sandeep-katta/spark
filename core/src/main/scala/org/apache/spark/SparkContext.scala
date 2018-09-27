@@ -2434,8 +2434,15 @@ class SparkContext(config: SparkConf) extends Logging {
       val schedulingMode = getSchedulingMode.toString
       val addedJarPaths = addedJars.keys.toSeq
       val addedFilePaths = addedFiles.keys.toSeq
+      // SPARK-25392 pool Information should be stored in the event
+      val poolInformation = getAllPools.map { it =>
+        val xmlString = ("<pool><item PoolName=\"%s\" MinimumShare=\"%d\"" +
+          " PoolWeight=\"%d\" SchedulingMode=\"%s\" /></pool>")
+          .format(it.name, it.minShare, it.weight, it.schedulingMode.toString)
+        (it.name, xmlString)
+      }
       val environmentDetails = SparkEnv.environmentDetails(conf, schedulingMode, addedJarPaths,
-        addedFilePaths)
+        addedFilePaths, poolInformation)
       val environmentUpdate = SparkListenerEnvironmentUpdate(environmentDetails)
       listenerBus.post(environmentUpdate)
     }
