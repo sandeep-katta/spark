@@ -2436,8 +2436,8 @@ class SparkContext(config: SparkConf) extends Logging {
       val addedFilePaths = addedFiles.keys.toSeq
       // SPARK-25392 pool Information should be stored in the event
       val poolInformation = getAllPools.map { it =>
-        val xmlString = ("<pool><item PoolName=\"%s\" MinimumShare=\"%d\"" +
-          " PoolWeight=\"%d\" SchedulingMode=\"%s\" /></pool>")
+        val xmlString = ("<pool><item PoolName='%s' MinimumShare='%d' " +
+          " PoolWeight='%d' SchedulingMode='%s' /></pool>")
           .format(it.name, it.minShare, it.weight, it.schedulingMode.toString)
         (it.name, xmlString)
       }
