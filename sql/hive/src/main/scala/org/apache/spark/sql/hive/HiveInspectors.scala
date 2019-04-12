@@ -18,6 +18,8 @@
 package org.apache.spark.sql.hive
 
 import java.lang.reflect.{ParameterizedType, Type, WildcardType}
+import java.sql.Date
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit._
 
 import scala.collection.JavaConverters._
@@ -495,7 +497,8 @@ private[hive] trait HiveInspectors {
         System.arraycopy(writable.getBytes, 0, constant, 0, constant.length)
         _ => constant
       case poi: WritableConstantDateObjectInspector =>
-        val constant = DateTimeUtils.fromJavaDate(poi.getWritableConstantValue.get())
+        val localDate = LocalDate.ofEpochDay(poi.getWritableConstantValue.get().toEpochDay)
+        val constant = DateTimeUtils.fromJavaDate(Date.valueOf(localDate))
         _ => constant
       case mi: StandardConstantMapObjectInspector =>
         val keyUnwrapper = unwrapperFor(mi.getMapKeyObjectInspector)
@@ -618,7 +621,8 @@ private[hive] trait HiveInspectors {
         case x: DateObjectInspector if x.preferWritable() =>
           data: Any => {
             if (data != null) {
-              DateTimeUtils.fromJavaDate(x.getPrimitiveWritableObject(data).get())
+              val date = LocalDate.ofEpochDay(x.getPrimitiveWritableObject(data).get().toEpochDay)
+              DateTimeUtils.fromJavaDate(Date.valueOf(date))
             } else {
               null
             }
@@ -626,7 +630,8 @@ private[hive] trait HiveInspectors {
         case x: DateObjectInspector =>
           data: Any => {
             if (data != null) {
-              DateTimeUtils.fromJavaDate(x.getPrimitiveJavaObject(data))
+              val date = LocalDate.ofEpochDay(x.getPrimitiveJavaObject(data).toEpochDay)
+              DateTimeUtils.fromJavaDate(Date.valueOf(date))
             } else {
               null
             }
@@ -643,7 +648,7 @@ private[hive] trait HiveInspectors {
         case ti: TimestampObjectInspector =>
           data: Any => {
             if (data != null) {
-              DateTimeUtils.fromJavaTimestamp(ti.getPrimitiveJavaObject(data))
+              DateTimeUtils.fromJavaTimestamp(ti.getPrimitiveJavaObject(data).toSqlTimestamp)
             } else {
               null
             }

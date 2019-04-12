@@ -56,16 +56,4 @@ public abstract class ExecuteStatementOperation extends Operation {
     }
     return new HiveCommandOperation(parentSession, statement, processor, confOverlay);
   }
-
-  protected void registerCurrentOperationLog() {
-    if (isOperationLogEnabled) {
-      if (operationLog == null) {
-        LOG.warn("Failed to get current OperationLog object of Operation: " +
-          getHandle().getHandleIdentifier());
-        isOperationLogEnabled = false;
-        return;
-      }
-      OperationLog.setCurrentOperationLog(operationLog);
-    }
-  }
 }

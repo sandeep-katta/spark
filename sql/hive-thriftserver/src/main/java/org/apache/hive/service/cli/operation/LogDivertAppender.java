@@ -17,34 +17,48 @@
  */
 
 package org.apache.hive.service.cli.operation;
-import java.io.CharArrayWriter;
-import java.util.Enumeration;
 import java.util.regex.Pattern;
 
+import org.apache.hadoop.hive.common.LogUtils;
+import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.ql.Driver;
 import org.apache.hadoop.hive.ql.exec.Task;
+import org.apache.hadoop.hive.ql.log.HushableRandomAccessFileAppender;
+import org.apache.hadoop.hive.ql.log.NullAppender;
 import org.apache.hadoop.hive.ql.log.PerfLogger;
 import org.apache.hadoop.hive.ql.session.OperationLog;
-import org.apache.hadoop.hive.ql.session.OperationLog.LoggingLevel;
-import org.apache.hive.service.cli.CLIServiceUtils;
-import org.apache.log4j.Appender;
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Logger;
-import org.apache.log4j.WriterAppender;
-import org.apache.log4j.spi.Filter;
-import org.apache.log4j.spi.LoggingEvent;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.routing.Route;
+import org.apache.logging.log4j.core.appender.routing.Routes;
+import org.apache.logging.log4j.core.appender.routing.RoutingAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Node;
+import org.apache.logging.log4j.core.config.plugins.Plugin;
+import org.apache.logging.log4j.core.config.plugins.PluginAttribute;
+import org.apache.logging.log4j.core.config.plugins.PluginFactory;
+import org.apache.logging.log4j.core.config.plugins.processor.PluginEntry;
+import org.apache.logging.log4j.core.config.plugins.util.PluginType;
+import org.apache.logging.log4j.core.filter.AbstractFilter;
+import org.apache.logging.log4j.core.layout.PatternLayout;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 
 /**
- * An Appender to divert logs from individual threads to the LogObject they belong to.
+ * Divert appender to redirect operation logs to separate files.
  */
-public class LogDivertAppender extends WriterAppender {
-  private static final Logger LOG = Logger.getLogger(LogDivertAppender.class.getName());
-  private final OperationManager operationManager;
-  private boolean isVerbose;
-  private Layout verboseLayout;
-
+public class LogDivertAppender {
+  private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(org.apache.hadoop.hive.ql.log.LogDivertAppender.class.getName());
+  public static final String verboseLayout = "%d{yy/MM/dd HH:mm:ss} %p %c{2}: %m%n";
+  public static final String nonVerboseLayout = "%-5p : %m%n";
+  /**
+   * Name of the query routine appender.
+   */
+  public static final String QUERY_ROUTING_APPENDER = "query-routing";
   /**
    * A log filter that filters messages coming from the logger with the given names.
    * It be used as a white list filter or a black list filter.
@@ -52,31 +66,30 @@ public class LogDivertAppender extends WriterAppender {
    * they don't generate more logs for themselves when they process logs.
    * White list filter is used for less verbose log collection
    */
-  private static class NameFilter extends Filter {
+  @Plugin(name = "NameFilter", category = "Core", elementType="filter", printObject = true)
+  private static class NameFilter extends AbstractFilter {
     private Pattern namePattern;
-    private LoggingLevel loggingMode;
-    private OperationManager operationManager;
+    private OperationLog.LoggingLevel loggingMode;
 
     /* Patterns that are excluded in verbose logging level.
      * Filter out messages coming from log processing classes, or we'll run an infinite loop.
      */
-    private static final Pattern verboseExcludeNamePattern = Pattern.compile(Joiner.on("|")
-      .join(new String[] {LOG.getName(), OperationLog.class.getName(),
-      OperationManager.class.getName()}));
+    private static final Pattern verboseExcludeNamePattern = Pattern.compile(Joiner.on("|").
+            join(new String[]{LOG.getName(), OperationLog.class.getName()}));
 
     /* Patterns that are included in execution logging level.
      * In execution mode, show only select logger messages.
      */
-    private static final Pattern executionIncludeNamePattern = Pattern.compile(Joiner.on("|")
-      .join(new String[] {"org.apache.hadoop.mapreduce.JobSubmitter",
-      "org.apache.hadoop.mapreduce.Job", "SessionState", Task.class.getName(),
-      "org.apache.hadoop.hive.ql.exec.spark.status.SparkJobMonitor"}));
+    private static final Pattern executionIncludeNamePattern = Pattern.compile(Joiner.on("|").
+            join(new String[]{"org.apache.hadoop.mapreduce.JobSubmitter",
+                    "org.apache.hadoop.mapreduce.Job", "SessionState", "ReplState", Task.class.getName(),
+                    Driver.class.getName(), "org.apache.hadoop.hive.ql.exec.spark.status.SparkJobMonitor"}));
 
     /* Patterns that are included in performance logging level.
      * In performance mode, show execution and performance logger messages.
      */
     private static final Pattern performanceIncludeNamePattern = Pattern.compile(
-      executionIncludeNamePattern.pattern() + "|" + PerfLogger.class.getName());
+            executionIncludeNamePattern.pattern() + "|" + PerfLogger.class.getName());
 
     private void setCurrentNamePattern(OperationLog.LoggingLevel mode) {
       if (mode == OperationLog.LoggingLevel.VERBOSE) {
@@ -88,122 +101,136 @@ public class LogDivertAppender extends WriterAppender {
       }
     }
 
-    NameFilter(
-      OperationLog.LoggingLevel loggingMode, OperationManager op) {
-      this.operationManager = op;
+    public NameFilter(OperationLog.LoggingLevel loggingMode) {
       this.loggingMode = loggingMode;
       setCurrentNamePattern(loggingMode);
     }
 
     @Override
-    public int decide(LoggingEvent ev) {
-      OperationLog log = operationManager.getOperationLogByThread();
+    public Result filter(LogEvent event) {
       boolean excludeMatches = (loggingMode == OperationLog.LoggingLevel.VERBOSE);
 
-      if (log == null) {
-        return Filter.DENY;
-      }
-
-      OperationLog.LoggingLevel currentLoggingMode = log.getOpLoggingLevel();
+      String logLevel = event.getContextMap().get(LogUtils.OPERATIONLOG_LEVEL_KEY);
+      logLevel = logLevel == null ? "" : logLevel;
+      OperationLog.LoggingLevel currentLoggingMode = OperationLog.getLoggingLevel(logLevel);
       // If logging is disabled, deny everything.
       if (currentLoggingMode == OperationLog.LoggingLevel.NONE) {
-        return Filter.DENY;
+        return Result.DENY;
       }
       // Look at the current session's setting
       // and set the pattern and excludeMatches accordingly.
       if (currentLoggingMode != loggingMode) {
         loggingMode = currentLoggingMode;
+        excludeMatches = (loggingMode == OperationLog.LoggingLevel.VERBOSE);
         setCurrentNamePattern(loggingMode);
       }
 
-      boolean isMatch = namePattern.matcher(ev.getLoggerName()).matches();
+      boolean isMatch = namePattern.matcher(event.getLoggerName()).matches();
 
       if (excludeMatches == isMatch) {
         // Deny if this is black-list filter (excludeMatches = true) and it
-        // matched
-        // or if this is whitelist filter and it didn't match
-        return Filter.DENY;
+        // matched or if this is whitelist filter and it didn't match
+        return Result.DENY;
       }
-      return Filter.NEUTRAL;
+
+      return Result.NEUTRAL;
     }
-  }
 
-  /** This is where the log message will go to */
-  private final CharArrayWriter writer = new CharArrayWriter();
-
-  private void setLayout(boolean isVerbose, Layout lo) {
-    if (isVerbose) {
-      if (lo == null) {
-        lo = CLIServiceUtils.verboseLayout;
-        LOG.info("Cannot find a Layout from a ConsoleAppender. Using default Layout pattern.");
-      }
-    } else {
-      lo = CLIServiceUtils.nonVerboseLayout;
-    }
-    setLayout(lo);
-  }
-
-  private void initLayout(boolean isVerbose) {
-    // There should be a ConsoleAppender. Copy its Layout.
-    Logger root = Logger.getRootLogger();
-    Layout layout = null;
-
-    Enumeration<?> appenders = root.getAllAppenders();
-    while (appenders.hasMoreElements()) {
-      Appender ap = (Appender) appenders.nextElement();
-      if (ap.getClass().equals(ConsoleAppender.class)) {
-        layout = ap.getLayout();
-        break;
-      }
-    }
-    setLayout(isVerbose, layout);
-  }
-
-  public LogDivertAppender(OperationManager operationManager,
-    OperationLog.LoggingLevel loggingMode) {
-    isVerbose = (loggingMode == OperationLog.LoggingLevel.VERBOSE);
-    initLayout(isVerbose);
-    setWriter(writer);
-    setName("LogDivertAppender");
-    this.operationManager = operationManager;
-    this.verboseLayout = isVerbose ? layout : CLIServiceUtils.verboseLayout;
-    addFilter(new NameFilter(loggingMode, operationManager));
-  }
-
-  @Override
-  public void doAppend(LoggingEvent event) {
-    OperationLog log = operationManager.getOperationLogByThread();
-
-    // Set current layout depending on the verbose/non-verbose mode.
-    if (log != null) {
-      boolean isCurrModeVerbose = (log.getOpLoggingLevel() == OperationLog.LoggingLevel.VERBOSE);
-
-      // If there is a logging level change from verbose->non-verbose or vice-versa since
-      // the last subAppend call, change the layout to preserve consistency.
-      if (isCurrModeVerbose != isVerbose) {
-        isVerbose = isCurrModeVerbose;
-        setLayout(isVerbose, verboseLayout);
-      }
-    }
-    super.doAppend(event);
   }
 
   /**
-   * Overrides WriterAppender.subAppend(), which does the real logging. No need
-   * to worry about concurrency since log4j calls this synchronously.
+   * Programmatically register a routing appender to Log4J configuration, which
+   * automatically writes the log of each query to an individual file.
+   * The equivalent property configuration is as follows:
+   * # queryId based routing file appender
+   appender.query-routing.type = Routing
+   appender.query-routing.name = query-routing
+   appender.query-routing.routes.type = Routes
+   appender.query-routing.routes.pattern = $${ctx:queryId}
+   # default route
+   appender.query-routing.routes.route-default.type = Route
+   appender.query-routing.routes.route-default.key = $${ctx:queryId}
+   appender.query-routing.routes.route-default.app.type = null
+   appender.query-routing.routes.route-default.app.name = Null
+   # queryId based route
+   appender.query-routing.routes.route-mdc.type = Route
+   appender.query-routing.routes.route-mdc.name = IrrelevantName-query-routing
+   appender.query-routing.routes.route-mdc.app.type = RandomAccessFile
+   appender.query-routing.routes.route-mdc.app.name = query-file-appender
+   appender.query-routing.routes.route-mdc.app.fileName = ${sys:hive.log.dir}/${ctx:sessionId}/${ctx:queryId}
+   appender.query-routing.routes.route-mdc.app.layout.type = PatternLayout
+   appender.query-routing.routes.route-mdc.app.layout.pattern = %d{ISO8601} %5p %c{2}: %m%n
+   * @param conf  the configuration for HiveServer2 instance
    */
-  @Override
-  protected void subAppend(LoggingEvent event) {
-    super.subAppend(event);
-    // That should've gone into our writer. Notify the LogContext.
-    String logOutput = writer.toString();
-    writer.reset();
+  public static void registerRoutingAppender(org.apache.hadoop.conf.Configuration conf) {
+    String loggingLevel = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_SERVER2_LOGGING_OPERATION_LEVEL);
+    OperationLog.LoggingLevel loggingMode = OperationLog.getLoggingLevel(loggingLevel);
+    String layout = loggingMode == OperationLog.LoggingLevel.VERBOSE ? verboseLayout : nonVerboseLayout;
+    String logLocation = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_SERVER2_LOGGING_OPERATION_LOG_LOCATION);
 
-    OperationLog log = operationManager.getOperationLogByThread();
-    if (log == null) {
-      LOG.debug(" ---+++=== Dropped log event from thread " + event.getThreadName());
-      return;
-    }
-    log.writeOperationLog(logOutput);
+    // Create NullAppender
+    PluginEntry nullEntry = new PluginEntry();
+    nullEntry.setClassName(NullAppender.class.getName());
+    nullEntry.setKey("null");
+    nullEntry.setName("appender");
+    PluginType<NullAppender> nullChildType = new PluginType<NullAppender>(nullEntry, NullAppender.class, "appender");
+    Node nullChildNode = new Node(null, "Null", nullChildType);
+
+    // Create default route
+    PluginEntry defaultEntry = new PluginEntry();
+    defaultEntry.setClassName(Route.class.getName());
+    defaultEntry.setKey("route");
+    defaultEntry.setName("Route");
+    PluginType<Route> defaultType = new PluginType<Route>(defaultEntry, Route.class, "Route");
+    Node nullNode = new Node(null, "Route", defaultType);
+    nullNode.getChildren().add(nullChildNode);
+    Route defaultRoute = Route.createRoute(null, "${ctx:queryId}", nullNode);
+
+    // Create queryId based route
+    PluginEntry entry = new PluginEntry();
+    entry.setClassName(Route.class.getName());
+    entry.setKey("route");
+    entry.setName("Route");
+    PluginType<Route> type = new PluginType<Route>(entry, Route.class, "Route");
+    Node node = new Node(null, "Route", type);
+
+    PluginEntry childEntry = new PluginEntry();
+    childEntry.setClassName(HushableRandomAccessFileAppender.class.getName());
+    childEntry.setKey("HushableMutableRandomAccess");
+    childEntry.setName("appender");
+    PluginType<HushableRandomAccessFileAppender> childType = new PluginType<>(childEntry, HushableRandomAccessFileAppender.class, "appender");
+    Node childNode = new Node(node, "HushableMutableRandomAccess", childType);
+    childNode.getAttributes().put("name", "query-file-appender");
+    childNode.getAttributes().put("fileName", logLocation + "/${ctx:sessionId}/${ctx:queryId}");
+    node.getChildren().add(childNode);
+
+    PluginEntry layoutEntry = new PluginEntry();
+    layoutEntry.setClassName(PatternLayout.class.getName());
+    layoutEntry.setKey("patternlayout");
+    layoutEntry.setName("layout");
+    PluginType<PatternLayout> layoutType = new PluginType<>(layoutEntry, PatternLayout.class, "layout");
+    Node layoutNode = new Node(childNode, "PatternLayout", layoutType);
+    layoutNode.getAttributes().put("pattern", layout);
+    childNode.getChildren().add(layoutNode);
+
+    Route mdcRoute = Route.createRoute(null, null, node);
+    Routes routes = Routes.createRoutes("${ctx:queryId}", defaultRoute, mdcRoute);
+
+    LoggerContext context = (LoggerContext) LogManager.getContext(false);
+    Configuration configuration = context.getConfiguration();
+
+    RoutingAppender routingAppender = RoutingAppender.createAppender(QUERY_ROUTING_APPENDER,
+            "true",
+            routes,
+            configuration,
+            null,
+            null,
+            null);
+
+    LoggerConfig loggerConfig = configuration.getRootLogger();
+    loggerConfig.addAppender(routingAppender, null, null);
+    context.updateLoggers();
+    routingAppender.start();
   }
+
 }

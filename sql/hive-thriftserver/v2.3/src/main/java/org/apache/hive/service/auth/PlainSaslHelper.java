@@ -20,6 +20,7 @@ package org.apache.hive.service.auth;
 import java.io.IOException;
 import java.security.Security;
 import java.util.HashMap;
+
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.NameCallback;
@@ -53,11 +54,11 @@ public final class PlainSaslHelper {
   }
 
   public static TTransportFactory getPlainTransportFactory(String authTypeStr)
-    throws LoginException {
+          throws LoginException {
     TSaslServerTransport.Factory saslFactory = new TSaslServerTransport.Factory();
     try {
       saslFactory.addServerDefinition("PLAIN", authTypeStr, null, new HashMap<String, String>(),
-        new PlainServerCallbackHandler(authTypeStr));
+              new PlainServerCallbackHandler(authTypeStr));
     } catch (AuthenticationException e) {
       throw new LoginException("Error setting callback handler" + e);
     }
@@ -65,16 +66,16 @@ public final class PlainSaslHelper {
   }
 
   public static TTransport getPlainTransport(String username, String password,
-    TTransport underlyingTransport) throws SaslException {
+                                             TTransport underlyingTransport) throws SaslException {
     return new TSaslClientTransport("PLAIN", null, null, null, new HashMap<String, String>(),
-      new PlainCallbackHandler(username, password), underlyingTransport);
+            new PlainCallbackHandler(username, password), underlyingTransport);
   }
 
   private PlainSaslHelper() {
     throw new UnsupportedOperationException("Can't initialize class");
   }
 
-  private static final class PlainServerCallbackHandler implements CallbackHandler {
+  public static final class PlainServerCallbackHandler implements CallbackHandler {
 
     private final AuthMethods authMethod;
 
@@ -102,7 +103,7 @@ public final class PlainSaslHelper {
         }
       }
       PasswdAuthenticationProvider provider =
-        AuthenticationProviderFactory.getAuthenticationProvider(authMethod);
+              AuthenticationProviderFactory.getAuthenticationProvider(authMethod);
       provider.Authenticate(username, password);
       if (ac != null) {
         ac.setAuthorized(true);

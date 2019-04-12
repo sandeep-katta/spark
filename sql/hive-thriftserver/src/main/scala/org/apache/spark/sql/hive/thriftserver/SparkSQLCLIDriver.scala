@@ -364,9 +364,9 @@ private[hive] class SparkSQLCLIDriver extends CliDriver with Logging {
         if (proc.isInstanceOf[Driver] || proc.isInstanceOf[SetProcessor] ||
           proc.isInstanceOf[AddResourceProcessor] || proc.isInstanceOf[ListResourceProcessor] ||
           proc.isInstanceOf[ResetProcessor] ) {
-          val driver = new SparkSQLDriver
+          val driver = new SparkSQLDriver(conf = hconf)
 
-          driver.init()
+          // driver.init()
           val out = sessionState.out
           val err = sessionState.err
           val startTimeNs: Long = System.nanoTime()
@@ -416,10 +416,12 @@ private[hive] class SparkSQLCLIDriver extends CliDriver with Logging {
               ret = 1
           }
 
-          val cret = driver.close()
-          if (ret == 0) {
-            ret = cret
-          }
+//          val cret = driver.close()
+//          if (ret == 0) {
+//            ret = cret
+//          }
+
+          driver.close()
 
           var responseMsg = s"Time taken: $timeTaken seconds"
           if (counter != 0) {

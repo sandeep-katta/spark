@@ -27,6 +27,8 @@ import java.util.Map;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Schema;
+import org.apache.hadoop.hive.ql.log.LogDivertAppender;
+import org.apache.hadoop.hive.ql.log.LogDivertAppenderForTest;
 import org.apache.hadoop.hive.ql.session.OperationLog;
 import org.apache.hive.service.AbstractService;
 import org.apache.hive.service.cli.FetchOrientation;
@@ -58,12 +60,8 @@ public class OperationManager extends AbstractService {
 
   @Override
   public synchronized void init(HiveConf hiveConf) {
-    if (hiveConf.getBoolVar(HiveConf.ConfVars.HIVE_SERVER2_LOGGING_OPERATION_ENABLED)) {
-      initOperationLogCapture(hiveConf.getVar(
-        HiveConf.ConfVars.HIVE_SERVER2_LOGGING_OPERATION_LEVEL));
-    } else {
-      LOG.debug("Operation level logging is turned off");
-    }
+    LogDivertAppender.registerRoutingAppender(hiveConf);
+    LogDivertAppenderForTest.registerRoutingAppenderIfInTest(hiveConf);
     super.init(hiveConf);
   }
 
@@ -77,12 +75,6 @@ public class OperationManager extends AbstractService {
   public synchronized void stop() {
     // TODO
     super.stop();
-  }
-
-  private void initOperationLogCapture(String loggingMode) {
-    // Register another Appender (with the same layout) that talks to us.
-    Appender ap = new LogDivertAppender(this, OperationLog.getLoggingLevel(loggingMode));
-    org.apache.log4j.Logger.getRootLogger().addAppender(ap);
   }
 
   public ExecuteStatementOperation newExecuteStatementOperation(HiveSession parentSession,
@@ -289,10 +281,6 @@ public class OperationManager extends AbstractService {
     fieldSchema.setType("string");
     schema.addToFieldSchemas(fieldSchema);
     return schema;
-  }
-
-  public OperationLog getOperationLogByThread() {
-    return OperationLog.getCurrentOperationLog();
   }
 
   public List<Operation> removeExpiredOperations(OperationHandle[] handles) {

@@ -35,7 +35,6 @@ import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Schema;
-import org.apache.hadoop.hive.ql.CommandNeedRetryException;
 import org.apache.hadoop.hive.ql.Driver;
 import org.apache.hadoop.hive.ql.QueryState;
 import org.apache.hadoop.hive.ql.exec.ExplainTask;
@@ -104,7 +103,7 @@ public class SQLOperation extends ExecuteStatementOperation {
       // In Hive server mode, we are not able to retry in the FetchTask
       // case, when calling fetch queries since execute() has returned.
       // For now, we disable the test attempts.
-      driver.setTryCount(Integer.MAX_VALUE);
+      // driver.setTryCount(Integer.MAX_VALUE);
 
       response = driver.compileAndRespond(statement);
       if (0 != response.getResponseCode()) {
@@ -149,7 +148,7 @@ public class SQLOperation extends ExecuteStatementOperation {
       // In Hive server mode, we are not able to retry in the FetchTask
       // case, when calling fetch queries since execute() has returned.
       // For now, we disable the test attempts.
-      driver.setTryCount(Integer.MAX_VALUE);
+      // driver.setTryCount(Integer.MAX_VALUE);
       response = driver.run();
       if (0 != response.getResponseCode()) {
         throw toSQLException("Error while processing statement", response);
@@ -200,14 +199,14 @@ public class SQLOperation extends ExecuteStatementOperation {
               Hive.set(parentHive);
               SessionState.setCurrentSessionState(parentSessionState);
               // Set current OperationLog in this async thread for keeping on saving query log.
-              registerCurrentOperationLog();
+              // registerCurrentOperationLog();
               try {
                 runQuery(opConfig);
               } catch (HiveSQLException e) {
                 setOperationException(e);
                 LOG.error("Error running hive query: ", e);
               } finally {
-                unregisterOperationLog();
+                // unregisterOperationLog();
               }
               return null;
             }
@@ -336,8 +335,6 @@ public class SQLOperation extends ExecuteStatementOperation {
       }
       return rowSet;
     } catch (IOException e) {
-      throw new HiveSQLException(e);
-    } catch (CommandNeedRetryException e) {
       throw new HiveSQLException(e);
     } catch (Exception e) {
       throw new HiveSQLException(e);

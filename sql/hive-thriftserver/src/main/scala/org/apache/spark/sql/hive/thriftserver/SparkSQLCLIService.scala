@@ -62,8 +62,7 @@ private[hive] class SparkSQLCLIService(hiveServer: HiveServer2, sqlContext: SQLC
         }
 
         val originalUgi = UserGroupInformation.getCurrentUser
-        sparkServiceUGI = if (HiveAuthFactory.needUgiLogin(originalUgi,
-          SecurityUtil.getServerPrincipal(principal, "0.0.0.0"), keyTabFile)) {
+        sparkServiceUGI = if (true) {
           HiveAuthFactory.loginFromKeytab(hiveConf)
           Utils.getUGI()
         } else {

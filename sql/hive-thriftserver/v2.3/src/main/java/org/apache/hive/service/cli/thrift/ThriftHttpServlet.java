@@ -20,9 +20,13 @@ package org.apache.hive.service.cli.thrift;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.security.PrivilegedExceptionAction;
+import java.security.SecureRandom;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -38,10 +42,13 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.apache.hadoop.hive.shims.HadoopShims.KerberosNameShim;
 import org.apache.hadoop.hive.shims.ShimLoader;
+import org.apache.hadoop.hive.shims.Utils;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.token.delegation.web.DelegationTokenAuthenticator;
 import org.apache.hive.service.CookieSigner;
 import org.apache.hive.service.auth.AuthenticationProviderFactory;
 import org.apache.hive.service.auth.AuthenticationProviderFactory.AuthMethods;
+import org.apache.hive.service.auth.HiveAuthConstants;
 import org.apache.hive.service.auth.HiveAuthFactory;
 import org.apache.hive.service.auth.HttpAuthUtils;
 import org.apache.hive.service.auth.HttpAuthenticationException;
@@ -77,7 +84,7 @@ public class ThriftHttpServlet extends TServlet {
   // Class members for cookie based authentication.
   private CookieSigner signer;
   public static final String AUTH_COOKIE = "hive.server2.auth";
-  private static final Random RAN = new Random();
+  private static final SecureRandom RAN = new SecureRandom();
   private boolean isCookieAuthEnabled;
   private String cookieDomain;
   private String cookiePath;
@@ -86,17 +93,18 @@ public class ThriftHttpServlet extends TServlet {
   private boolean isHttpOnlyCookie;
   private final HiveAuthFactory hiveAuthFactory;
   private static final String HIVE_DELEGATION_TOKEN_HEADER =  "X-Hive-Delegation-Token";
+  private static final String X_FORWARDED_FOR = "X-Forwarded-For";
 
   public ThriftHttpServlet(TProcessor processor, TProtocolFactory protocolFactory,
-      String authType, UserGroupInformation serviceUGI, UserGroupInformation httpUGI,
-      HiveAuthFactory hiveAuthFactory) {
+                           String authType, UserGroupInformation serviceUGI, UserGroupInformation httpUGI,
+                           HiveAuthFactory hiveAuthFactory) {
     super(processor, protocolFactory);
     this.authType = authType;
     this.serviceUGI = serviceUGI;
     this.httpUGI = httpUGI;
     this.hiveAuthFactory = hiveAuthFactory;
     this.isCookieAuthEnabled = hiveConf.getBoolVar(
-      ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_AUTH_ENABLED);
+            ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_AUTH_ENABLED);
     // Initialize the cookie based authentication related variables.
     if (isCookieAuthEnabled) {
       // Generate the signer with secret.
@@ -104,24 +112,31 @@ public class ThriftHttpServlet extends TServlet {
       LOG.debug("Using the random number as the secret for cookie generation " + secret);
       this.signer = new CookieSigner(secret.getBytes());
       this.cookieMaxAge = (int) hiveConf.getTimeVar(
-        ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_MAX_AGE, TimeUnit.SECONDS);
+              ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_MAX_AGE, TimeUnit.SECONDS);
       this.cookieDomain = hiveConf.getVar(ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_DOMAIN);
       this.cookiePath = hiveConf.getVar(ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_PATH);
-      this.isCookieSecure = hiveConf.getBoolVar(
-        ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_IS_SECURE);
+      // always send secure cookies for SSL mode
+      this.isCookieSecure = hiveConf.getBoolVar(ConfVars.HIVE_SERVER2_USE_SSL);
       this.isHttpOnlyCookie = hiveConf.getBoolVar(
-        ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_IS_HTTPONLY);
+              ConfVars.HIVE_SERVER2_THRIFT_HTTP_COOKIE_IS_HTTPONLY);
     }
   }
 
   @Override
   protected void doPost(HttpServletRequest request, HttpServletResponse response)
-      throws ServletException, IOException {
+          throws ServletException, IOException {
     String clientUserName = null;
     String clientIpAddress;
     boolean requireNewCookie = false;
 
     try {
+      if (hiveConf.getBoolean(ConfVars.HIVE_SERVER2_XSRF_FILTER_ENABLED.varname,false)){
+        boolean continueProcessing = Utils.doXsrfFilter(request,response,null,null);
+        if (!continueProcessing){
+          LOG.warn("Request did not have valid XSRF header, rejecting.");
+          return;
+        }
+      }
       // If the cookie based authentication is already enabled, parse the
       // request and validate the request cookies.
       if (isCookieAuthEnabled) {
@@ -165,9 +180,10 @@ public class ThriftHttpServlet extends TServlet {
       LOG.debug("Client IP Address: " + clientIpAddress);
       // Set the thread local ip address
       SessionManager.setIpAddress(clientIpAddress);
+
       // Generate new cookie and add it to the response
       if (requireNewCookie &&
-          !authType.equalsIgnoreCase(HiveAuthFactory.AuthTypes.NOSASL.toString())) {
+              !authType.equalsIgnoreCase(HiveAuthConstants.AuthTypes.NOSASL.toString())) {
         String cookieToken = HttpAuthUtils.createCookieToken(clientUserName);
         Cookie hs2Cookie = createCookie(signer.signCookie(cookieToken));
 
@@ -254,7 +270,7 @@ public class ThriftHttpServlet extends TServlet {
     String cookieStr = "";
 
     for (Cookie c : cookies) {
-     cookieStr += c.getName() + "=" + c.getValue() + " ;\n";
+      cookieStr += c.getName() + "=" + c.getValue() + " ;\n";
     }
     return cookieStr;
   }
@@ -313,8 +329,8 @@ public class ThriftHttpServlet extends TServlet {
    */
   private static String getHttpOnlyCookieHeader(Cookie cookie) {
     NewCookie newCookie = new NewCookie(cookie.getName(), cookie.getValue(),
-      cookie.getPath(), cookie.getDomain(), cookie.getVersion(),
-      cookie.getComment(), cookie.getMaxAge(), cookie.getSecure());
+            cookie.getPath(), cookie.getDomain(), cookie.getVersion(),
+            cookie.getComment(), cookie.getMaxAge(), cookie.getSecure());
     return newCookie + "; HttpOnly";
   }
 
@@ -325,10 +341,10 @@ public class ThriftHttpServlet extends TServlet {
    * @throws HttpAuthenticationException
    */
   private String doPasswdAuth(HttpServletRequest request, String authType)
-      throws HttpAuthenticationException {
+          throws HttpAuthenticationException {
     String userName = getUsername(request, authType);
     // No-op when authType is NOSASL
-    if (!authType.equalsIgnoreCase(HiveAuthFactory.AuthTypes.NOSASL.toString())) {
+    if (!authType.equalsIgnoreCase(HiveAuthConstants.AuthTypes.NOSASL.toString())) {
       try {
         AuthMethods authMethod = AuthMethods.getValidAuthMethod(authType);
         PasswdAuthenticationProvider provider =
@@ -363,14 +379,14 @@ public class ThriftHttpServlet extends TServlet {
    * @throws HttpAuthenticationException
    */
   private String doKerberosAuth(HttpServletRequest request)
-      throws HttpAuthenticationException {
+          throws HttpAuthenticationException {
     // Try authenticating with the http/_HOST principal
     if (httpUGI != null) {
       try {
         return httpUGI.doAs(new HttpKerberosServerAction(request, httpUGI));
       } catch (Exception e) {
         LOG.info("Failed to authenticate with http/_HOST kerberos principal, " +
-            "trying with hive/_HOST kerberos principal");
+                "trying with hive/_HOST kerberos principal");
       }
     }
     // Now try with hive/_HOST principal
@@ -388,7 +404,7 @@ public class ThriftHttpServlet extends TServlet {
     UserGroupInformation serviceUGI;
 
     HttpKerberosServerAction(HttpServletRequest request,
-        UserGroupInformation serviceUGI) {
+                             UserGroupInformation serviceUGI) {
       this.request = request;
       this.serviceUGI = serviceUGI;
     }
@@ -399,7 +415,7 @@ public class ThriftHttpServlet extends TServlet {
       GSSManager manager = GSSManager.getInstance();
       GSSContext gssContext = null;
       String serverPrincipal = getPrincipalWithoutRealm(
-          serviceUGI.getUserName());
+              serviceUGI.getUserName());
       try {
         // This Oid for Kerberos GSS-API mechanism.
         Oid kerberosMechOid = new Oid("1.2.840.113554.1.2.2");
@@ -413,9 +429,9 @@ public class ThriftHttpServlet extends TServlet {
 
         // GSS credentials for server
         GSSCredential serverCreds = manager.createCredential(serverName,
-            GSSCredential.DEFAULT_LIFETIME,
-            new Oid[]{kerberosMechOid, spnegoMechOid},
-            GSSCredential.ACCEPT_ONLY);
+                GSSCredential.DEFAULT_LIFETIME,
+                new Oid[]{kerberosMechOid, spnegoMechOid},
+                GSSCredential.ACCEPT_ONLY);
 
         // Create a GSS context
         gssContext = manager.createContext(serverCreds);
@@ -426,8 +442,8 @@ public class ThriftHttpServlet extends TServlet {
         // Authenticate or deny based on its context completion
         if (!gssContext.isEstablished()) {
           throw new HttpAuthenticationException("Kerberos authentication failed: " +
-              "unable to establish context with the service ticket " +
-              "provided by the client.");
+                  "unable to establish context with the service ticket " +
+                  "provided by the client.");
         }
         else {
           return getPrincipalWithoutRealmAndHost(gssContext.getSrcName().toString());
@@ -448,7 +464,7 @@ public class ThriftHttpServlet extends TServlet {
     }
 
     private String getPrincipalWithoutRealm(String fullPrincipal)
-        throws HttpAuthenticationException {
+            throws HttpAuthenticationException {
       KerberosNameShim fullKerberosName;
       try {
         fullKerberosName = ShimLoader.getHadoopShims().getKerberosNameShim(fullPrincipal);
@@ -465,7 +481,7 @@ public class ThriftHttpServlet extends TServlet {
     }
 
     private String getPrincipalWithoutRealmAndHost(String fullPrincipal)
-        throws HttpAuthenticationException {
+            throws HttpAuthenticationException {
       KerberosNameShim fullKerberosName;
       try {
         fullKerberosName = ShimLoader.getHadoopShims().getKerberosNameShim(fullPrincipal);
@@ -477,32 +493,32 @@ public class ThriftHttpServlet extends TServlet {
   }
 
   private String getUsername(HttpServletRequest request, String authType)
-      throws HttpAuthenticationException {
-    String[] creds = getAuthHeaderTokens(request, authType);
+          throws HttpAuthenticationException {
+    String creds[] = getAuthHeaderTokens(request, authType);
     // Username must be present
     if (creds[0] == null || creds[0].isEmpty()) {
       throw new HttpAuthenticationException("Authorization header received " +
-          "from the client does not contain username.");
+              "from the client does not contain username.");
     }
     return creds[0];
   }
 
   private String getPassword(HttpServletRequest request, String authType)
-      throws HttpAuthenticationException {
-    String[] creds = getAuthHeaderTokens(request, authType);
+          throws HttpAuthenticationException {
+    String creds[] = getAuthHeaderTokens(request, authType);
     // Password must be present
     if (creds[1] == null || creds[1].isEmpty()) {
       throw new HttpAuthenticationException("Authorization header received " +
-          "from the client does not contain username.");
+              "from the client does not contain username.");
     }
     return creds[1];
   }
 
   private String[] getAuthHeaderTokens(HttpServletRequest request,
-      String authType) throws HttpAuthenticationException {
+                                       String authType) throws HttpAuthenticationException {
     String authHeaderBase64 = getAuthHeader(request, authType);
     String authHeaderString = StringUtils.newStringUtf8(
-        Base64.decodeBase64(authHeaderBase64.getBytes()));
+            Base64.decodeBase64(authHeaderBase64.getBytes()));
     String[] creds = authHeaderString.split(":");
     return creds;
   }
@@ -515,12 +531,12 @@ public class ThriftHttpServlet extends TServlet {
    * @throws HttpAuthenticationException
    */
   private String getAuthHeader(HttpServletRequest request, String authType)
-      throws HttpAuthenticationException {
+          throws HttpAuthenticationException {
     String authHeader = request.getHeader(HttpAuthUtils.AUTHORIZATION);
     // Each http request must have an Authorization header
     if (authHeader == null || authHeader.isEmpty()) {
       throw new HttpAuthenticationException("Authorization header received " +
-          "from the client is empty.");
+              "from the client is empty.");
     }
 
     String authHeaderBase64String;
@@ -535,13 +551,13 @@ public class ThriftHttpServlet extends TServlet {
     // Authorization header must have a payload
     if (authHeaderBase64String == null || authHeaderBase64String.isEmpty()) {
       throw new HttpAuthenticationException("Authorization header received " +
-          "from the client does not contain any data.");
+              "from the client does not contain any data.");
     }
     return authHeaderBase64String;
   }
 
   private boolean isKerberosAuthMode(String authType) {
-    return authType.equalsIgnoreCase(HiveAuthFactory.AuthTypes.KERBEROS.toString());
+    return authType.equalsIgnoreCase(HiveAuthConstants.AuthTypes.KERBEROS.toString());
   }
 
   private static String getDoAsQueryParam(String queryString) {
@@ -562,5 +578,3 @@ public class ThriftHttpServlet extends TServlet {
   }
 
 }
-
-

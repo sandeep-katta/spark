@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.hadoop.hive.common.LogUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.QueryState;
 import org.apache.hadoop.hive.ql.processors.CommandProcessorResponse;
@@ -87,7 +88,11 @@ public abstract class Operation {
     lastAccessTime = System.currentTimeMillis();
     operationTimeout = HiveConf.getTimeVar(parentSession.getHiveConf(),
         HiveConf.ConfVars.HIVE_SERVER2_IDLE_OPERATION_TIMEOUT, TimeUnit.MILLISECONDS);
-    queryState = new QueryState(parentSession.getHiveConf(), confOverlay, runInBackground);
+    queryState = new QueryState.Builder()
+        .withConfOverlay(confOverlay)
+        .withGenerateNewQueryId(true)
+        .withHiveConf(parentSession.getHiveConf())
+        .build();
   }
 
   public Future<?> getBackgroundHandle() {
@@ -230,23 +235,7 @@ public abstract class Operation {
       }
 
       // create OperationLog object with above log file
-      try {
-        operationLog = new OperationLog(opHandle.toString(), operationLogFile, parentSession.getHiveConf());
-      } catch (FileNotFoundException e) {
-        LOG.warn("Unable to instantiate OperationLog object for operation: " +
-            opHandle, e);
-        isOperationLogEnabled = false;
-        return;
-      }
-
-      // register this operationLog to current thread
-      OperationLog.setCurrentOperationLog(operationLog);
-    }
-  }
-
-  protected void unregisterOperationLog() {
-    if (isOperationLogEnabled) {
-      OperationLog.removeCurrentOperationLog();
+      operationLog = new OperationLog(opHandle.toString(), operationLogFile, parentSession.getHiveConf());
     }
   }
 
@@ -256,6 +245,7 @@ public abstract class Operation {
    */
   protected void beforeRun() {
     createOperationLog();
+    LogUtils.registerLoggingContext(queryState.getConf());
   }
 
   /**
@@ -263,7 +253,7 @@ public abstract class Operation {
    * Clean up resources, which was set up in beforeRun().
    */
   protected void afterRun() {
-    unregisterOperationLog();
+    LogUtils.unregisterLoggingContext();
   }
 
   /**
