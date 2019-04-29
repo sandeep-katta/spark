@@ -16,6 +16,10 @@
  */
 package org.apache.spark.sql.internal
 
+import scala.collection.JavaConverters._
+
+import org.apache.hadoop.conf.Configuration
+
 import org.apache.spark.SparkConf
 import org.apache.spark.annotation.{Experimental, Unstable}
 import org.apache.spark.sql.{ExperimentalMethods, SparkSession, UDFRegistration, _}
@@ -79,6 +83,17 @@ abstract class BaseSessionStateBuilder(
   }
 
   /**
+   * This hadoopConf contains user settings in Hadoop's core-site.xml file
+   * and Hive's hive-site.xml file. Note, we load hive-site.xml file manually in
+   * SharedState and put settings in this hadoopConf
+   */
+  private def mergeHadoopConf(conf: SQLConf, hadoopConf: Configuration): Unit = {
+    (hadoopConf.iterator().asScala.map(kv => kv.getKey -> kv.getValue)).foreach {
+      case (k, v) => conf.setConfString(k, v)
+    }
+  }
+
+  /**
    * SQL-specific key-value configurations.
    *
    * These either get cloned from a pre-existing instance or newly created. The conf is merged
@@ -88,6 +103,7 @@ abstract class BaseSessionStateBuilder(
     parentState.map(_.conf.clone()).getOrElse {
       val conf = new SQLConf
       mergeSparkConf(conf, session.sparkContext.conf)
+      mergeHadoopConf(conf, session.sparkContext.hadoopConfiguration)
       conf
     }
   }

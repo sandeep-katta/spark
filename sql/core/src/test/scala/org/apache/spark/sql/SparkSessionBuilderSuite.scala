@@ -152,4 +152,9 @@ class SparkSessionBuilderSuite extends SparkFunSuite with BeforeAndAfterEach {
       session.sparkContext.hadoopConfiguration.unset(mySpecialKey)
     }
   }
+
+  test("SPARK-27555: Spark SessionState.conf should load hive-site.xml ") {
+    val session = SparkSession.builder().master("local").getOrCreate()
+    assert(session.sessionState.conf.getConfString("hive.in.test") == "true")
+  }
 }
