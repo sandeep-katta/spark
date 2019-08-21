@@ -306,11 +306,11 @@ class CliSuite extends SparkFunSuite with BeforeAndAfterAll with Logging {
     )
   }
 
-  test("SPARK-28840 test --jar command") {
+  test("SPARK-28840 test --jars command") {
     val jarFile = new File("../../sql/hive/src/test/resources/SPARK-21101-1.0.jar").getCanonicalPath
     runCliWithin(
       1.minute,
-      Seq(s"--jars=$jarFile"))(
+      Seq(s"--jars", s"$jarFile"))(
       s"CREATE TEMPORARY FUNCTION testjar AS" +
         s" 'org.apache.spark.sql.hive.execution.UDTFStack';" -> "",
       "SELECT testjar(1,'A', 10);" -> "A\t10"
