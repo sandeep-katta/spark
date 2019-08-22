@@ -95,7 +95,7 @@ private[hive] object SparkSQLCLIDriver extends Logging {
         cliConf.set(k, v)
     }
 
-    val orginalClassLoader = Thread.currentThread().getContextClassLoader
+    val originalClassLoader = Thread.currentThread().getContextClassLoader
     val sessionState = new CliSessionState(cliConf)
 
     sessionState.in = System.in
@@ -141,7 +141,7 @@ private[hive] object SparkSQLCLIDriver extends Logging {
       // Hadoop-20 and above - we need to augment classpath using hiveconf
       // components.
       // See also: code in ExecDriver.java
-      var loader = orginalClassLoader
+      var loader = originalClassLoader
       val auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEAUXJARS)
       if (StringUtils.isNotBlank(auxJars)) {
         loader = Utilities.addToClassPath(loader, StringUtils.split(auxJars, ","))
