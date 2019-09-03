@@ -310,9 +310,9 @@ class CliSuite extends SparkFunSuite with BeforeAndAfterAll with Logging {
     val jarFile = new File("../../sql/hive/src/test/resources/SPARK-21101-1.0.jar").getCanonicalPath
     runCliWithin(
       1.minute,
-      Seq(s"--jars", s"$jarFile"))(
-      s"CREATE TEMPORARY FUNCTION testjar AS" +
-        s" 'org.apache.spark.sql.hive.execution.UDTFStack';" -> "",
+      Seq("--jars", s"$jarFile"))(
+      "CREATE TEMPORARY FUNCTION testjar AS" +
+        " 'org.apache.spark.sql.hive.execution.UDTFStack';" -> "",
       "SELECT testjar(1,'A', 10);" -> "A\t10"
     )
   }
@@ -322,10 +322,10 @@ class CliSuite extends SparkFunSuite with BeforeAndAfterAll with Logging {
     val hiveContribJar = HiveTestUtils.getHiveContribJar.getCanonicalPath
     runCliWithin(
       1.minute,
-      Seq(s"--jars", s"$jarFile", "--conf",
+      Seq("--jars", s"$jarFile", "--conf",
         s"spark.hadoop.${ConfVars.HIVEAUXJARS}=$hiveContribJar"))(
-      s"CREATE TEMPORARY FUNCTION testjar AS" +
-        s" 'org.apache.spark.sql.hive.execution.UDTFStack';" -> "",
+      "CREATE TEMPORARY FUNCTION testjar AS" +
+        " 'org.apache.spark.sql.hive.execution.UDTFStack';" -> "",
       "SELECT testjar(1,'A', 10);" -> "A\t10",
       s"CREATE TEMPORARY FUNCTION example_max AS '${classOf[UDAFExampleMax].getName}';" -> "",
       "SELECT example_max(1);" -> "1"
