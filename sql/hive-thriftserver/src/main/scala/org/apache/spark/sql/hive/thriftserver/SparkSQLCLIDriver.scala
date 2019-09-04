@@ -94,7 +94,6 @@ private[hive] object SparkSQLCLIDriver extends Logging {
         cliConf.set(k, v)
     }
 
-    val originalClassLoader = Thread.currentThread().getContextClassLoader
     val sessionState = new CliSessionState(cliConf)
 
     sessionState.in = System.in
