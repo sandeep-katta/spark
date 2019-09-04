@@ -94,7 +94,6 @@ private[hive] object SparkSQLCLIDriver extends Logging {
         cliConf.set(k, v)
     }
 
-    val originalClassLoader = Thread.currentThread().getContextClassLoader
     val sessionState = new CliSessionState(cliConf)
 
     sessionState.in = System.in
@@ -112,6 +111,11 @@ private[hive] object SparkSQLCLIDriver extends Logging {
 
     // Set all properties specified via command line.
     val conf: HiveConf = sessionState.getConf
+    // Hive 2.0.0 onwards HiveConf.getClassLoader returns the UDFClassLoader (created by Hive).
+    // Because of this spark cannot find the jars as class loader got changed
+    // Hive changed the class loader because of HIVE-11878, so it is required to use old
+    // classLoader as sparks loaded all the jars in this classLoader
+    conf.setClassLoader(Thread.currentThread().getContextClassLoader)
     sessionState.cmdProperties.entrySet().asScala.foreach { item =>
       val key = item.getKey.toString
       val value = item.getValue.toString
@@ -140,11 +144,7 @@ private[hive] object SparkSQLCLIDriver extends Logging {
       // Hadoop-20 and above - we need to augment classpath using hiveconf
       // components.
       // See also: code in ExecDriver.java
-      // Hive 2.0.0 onwards HiveConf.getClassLoader returns the UDFClassLoader (created by Hive).
-      // Because of this spark cannot find the jars as class loader got changed
-      // Hive changed the class loader because of HIVE-11878, so it is required to use old
-      // classLoader as sparks loaded all the jars in this classLoader
-      var loader = originalClassLoader
+      var loader = conf.getClassLoader
       val auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEAUXJARS)
       if (StringUtils.isNotBlank(auxJars)) {
         loader = ThriftserverShimUtils.addToClassPath(loader, StringUtils.split(auxJars, ","))
