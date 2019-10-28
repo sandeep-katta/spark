@@ -34,7 +34,7 @@ import org.apache.spark.sql.execution.CacheManager
 import org.apache.spark.sql.execution.ui.{SQLAppStatusListener, SQLAppStatusStore, SQLTab}
 import org.apache.spark.sql.internal.StaticSQLConf._
 import org.apache.spark.status.ElementTrackingStore
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{MutableURLClassLoader, Utils}
 
 
 /**
@@ -171,9 +171,17 @@ private[sql] class SharedState(
   /**
    * A classloader used to load all user-added jar.
    */
-  val jarClassLoader = new NonClosableMutableURLClassLoader(
-    org.apache.spark.util.Utils.getContextOrSparkClassLoader)
+  private var closeableJarClassLoader = new MutableURLClassLoader(Array(),
+    Utils.getContextOrSparkClassLoader)
 
+  def jarClassLoader: MutableURLClassLoader = closeableJarClassLoader
+
+
+  def updateClassLoader(urls: Array[URL]): Unit = {
+    closeableJarClassLoader.close()
+    closeableJarClassLoader = null
+    closeableJarClassLoader = new MutableURLClassLoader(urls, Utils.getSparkClassLoader)
+  }
 }
 
 object SharedState extends Logging {

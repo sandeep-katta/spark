@@ -19,6 +19,7 @@ package org.apache.spark.sql.hive.client
 
 import java.io.{File, PrintStream}
 import java.lang.{Iterable => JIterable}
+import java.net.URL
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.{Locale, Map => JMap}
 import java.util.concurrent.TimeUnit._
@@ -914,6 +915,12 @@ private[hive] class HiveClientImpl(
   }
 
   def addJar(path: String): Unit = {
+    val jarURL = getJarURL(path)
+    clientLoader.addJar(jarURL)
+    runSqlHive(s"ADD JAR $path")
+  }
+
+  private def getJarURL(path: String): URL = {
     val uri = new Path(path).toUri
     val jarURL = if (uri.getScheme == null) {
       // `path` is a local file path without a URL scheme
@@ -922,8 +929,12 @@ private[hive] class HiveClientImpl(
       // `path` is a URL with a scheme
       uri.toURL
     }
-    clientLoader.addJar(jarURL)
-    runSqlHive(s"ADD JAR $path")
+    jarURL
+  }
+
+  def removeJar(path: String): Unit = {
+    val jarURL = getJarURL(path)
+    clientLoader.removeJar(jarURL)
   }
 
   def newSession(): HiveClientImpl = {

@@ -99,3 +99,18 @@ case class ListJarsCommand(jars: Seq[String] = Seq.empty[String]) extends Runnab
     }
   }
 }
+
+/**
+ *  case class DeleteJarCommand(path: String) extends RunnableCommand {
+ * override def run(sparkSession: SparkSession): Seq[Row] = {
+ *   sparkSession.sessionState.resourceLoader.removeJar(path)
+ *  Seq.empty[Row]
+ * }
+ * }
+ * case class DeleteFileCommand(path: String) extends RunnableCommand {
+ *   override def run(sparkSession: SparkSession): Seq[Row] = {
+ *   sparkSession.sparkContext.addFile(path)
+ *   Seq.empty[Row]
+ *   }
+ * }
+ */

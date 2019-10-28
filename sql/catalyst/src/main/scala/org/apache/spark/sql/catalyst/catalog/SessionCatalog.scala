@@ -1146,6 +1146,7 @@ class SessionCatalog(
     requireDbExists(db)
     val identifier = name.copy(database = Some(db))
     if (functionExists(identifier)) {
+      val functionResource = externalCatalog.getFunction(db, name.funcName).resources
       if (functionRegistry.functionExists(identifier)) {
         // If we have loaded this function into the FunctionRegistry,
         // also drop it from there.
@@ -1153,6 +1154,7 @@ class SessionCatalog(
         // when it's first used, we also need to drop it from the FunctionRegistry.
         functionRegistry.dropFunction(identifier)
       }
+      unloadFunctionResources(functionResource)
       externalCatalog.dropFunction(db, name.funcName)
     } else if (!ignoreIfNotExists) {
       throw new NoSuchPermanentFunctionException(db = db, func = identifier.toString)
@@ -1255,6 +1257,14 @@ class SessionCatalog(
    */
   def loadFunctionResources(resources: Seq[FunctionResource]): Unit = {
     resources.foreach(functionResourceLoader.loadResource)
+  }
+
+  /**
+   *
+   * Unloads the JARs from the ClassLoader TODO add proper comment
+   */
+  def unloadFunctionResources(resources: Seq[FunctionResource]): Unit = {
+    resources.foreach(functionResourceLoader.unloadResource)
   }
 
   /**

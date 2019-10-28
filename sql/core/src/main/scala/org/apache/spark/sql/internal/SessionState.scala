@@ -18,6 +18,7 @@
 package org.apache.spark.sql.internal
 
 import java.io.File
+import java.net.URL
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
@@ -150,6 +151,14 @@ class SessionResourceLoader(session: SparkSession) extends FunctionResourceLoade
     }
   }
 
+
+  override def unloadResource(resource: FunctionResource): Unit = {
+    resource.resourceType match {
+      case JarResource => removeJar(resource.uri)
+      case _ => // Ignore
+    }
+  }
+
   /**
    * Add a jar path to [[SparkContext]] and the classloader.
    *
@@ -159,6 +168,11 @@ class SessionResourceLoader(session: SparkSession) extends FunctionResourceLoade
    */
   def addJar(path: String): Unit = {
     session.sparkContext.addJar(path)
+    session.sharedState.jarClassLoader.addURL(getJarURL(path))
+    Thread.currentThread().setContextClassLoader(session.sharedState.jarClassLoader)
+  }
+
+  private def getJarURL(path: String): URL = {
     val uri = new Path(path).toUri
     val jarURL = if (uri.getScheme == null) {
       // `path` is a local file path without a URL scheme
@@ -167,7 +181,14 @@ class SessionResourceLoader(session: SparkSession) extends FunctionResourceLoade
       // `path` is a URL with a scheme
       uri.toURL
     }
-    session.sharedState.jarClassLoader.addURL(jarURL)
+    jarURL
+  }
+
+  def removeJar(path: String): Unit = {
+    session.sparkContext.removeJar(path)
+    val jarURL = getJarURL(path)
+    val newJars = session.sharedState.jarClassLoader.getURLs.filter(!_.equals(jarURL))
+    session.sharedState.updateClassLoader(newJars)
     Thread.currentThread().setContextClassLoader(session.sharedState.jarClassLoader)
   }
 }

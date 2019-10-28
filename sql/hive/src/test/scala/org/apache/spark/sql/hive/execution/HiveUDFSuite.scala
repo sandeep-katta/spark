@@ -602,6 +602,7 @@ class HiveUDFSuite extends QueryTest with TestHiveSingleton with SQLTestUtils {
   test("UDTF") {
     withUserDefinedFunction("udtf_count2" -> true) {
       sql(s"ADD JAR ${hiveContext.getHiveFile("TestUDTF.jar").getCanonicalPath}")
+      sql("list jars").show(false)
       // The function source code can be found at:
       // https://cwiki.apache.org/confluence/display/Hive/DeveloperGuide+UDTF
       sql(

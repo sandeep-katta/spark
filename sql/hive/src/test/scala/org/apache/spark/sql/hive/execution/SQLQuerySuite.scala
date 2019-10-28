@@ -25,7 +25,6 @@ import java.util.{Locale, Set}
 
 import com.google.common.io.Files
 import org.apache.hadoop.fs.{FileSystem, Path}
-
 import org.apache.spark.{SparkException, TestUtils}
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.TableIdentifier
@@ -43,6 +42,7 @@ import org.apache.spark.sql.internal.StaticSQLConf.GLOBAL_TEMP_DATABASE
 import org.apache.spark.sql.test.SQLTestUtils
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.CalendarInterval
+import org.apache.spark.util.Utils
 
 case class Nested1(f1: Nested2)
 case class Nested2(f2: Nested3)
@@ -2431,5 +2431,19 @@ class SQLQuerySuite extends QueryTest with SQLTestUtils with TestHiveSingleton {
         Thread.setDefaultUncaughtExceptionHandler(defaultUncaughtExceptionHandler)
       }
     }
+  }
+  test("SPARK-XXXX drop function should remove jars from the classLoader ") {
+    sql(
+      s"""
+         |CREATE FUNCTION udtf_stack1
+         |AS 'org.apache.spark.sql.hive.execution.UDTFStack'
+         |USING JAR '${hiveContext.getHiveFile("SPARK-21101-1.0.jar").toURI}'
+        """.stripMargin)
+    val cnt =
+      sql("SELECT udtf_stack1(2, 'A', 10, date '2015-01-01', 'B', 20, date '2016-01-01')").count()
+    assert(cnt === 2)
+    sql("DROP FUNCTION udtf_stack1")
+    assert(!Utils.classIsLoadable("org.apache.spark.sql.hive.execution.UDTFStack"))
+    checkAnswer(sql("list jars"),Seq.empty)
   }
 }

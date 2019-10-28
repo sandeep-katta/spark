@@ -18,7 +18,7 @@
 package org.apache.spark
 
 import java.io._
-import java.net.URI
+import java.net.{URI, URL}
 import java.util.{Arrays, Locale, Properties, ServiceLoader, UUID}
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentMap}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
@@ -1887,6 +1887,17 @@ class SparkContext(config: SparkConf) extends Logging {
         }
       }
     }
+  }
+
+  def removeJar(path: String): Unit = {
+    val uri = new URI(path)
+    val key = uri.getScheme match {
+      case "file" =>
+        val fName = new File(uri.getRawPath).getName
+        s"${env.rpcEnv.address.toSparkURL}/jars/${Utils.encodeFileNameToURIRawPath(fName)}"
+      case _ => uri.getPath
+    }
+    addedJars.remove(key)
   }
 
   /**

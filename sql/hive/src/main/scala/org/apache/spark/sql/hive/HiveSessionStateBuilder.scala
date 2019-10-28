@@ -117,4 +117,9 @@ class HiveSessionResourceLoader(
     client.addJar(path)
     super.addJar(path)
   }
+
+  override def removeJar(uri: String): Unit = {
+    client.removeJar(uri)
+    super.removeJar(uri)
+  }
 }
