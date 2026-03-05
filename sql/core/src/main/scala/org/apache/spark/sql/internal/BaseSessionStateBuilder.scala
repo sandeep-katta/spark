@@ -39,7 +39,7 @@ import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.{TableCapabilityCheck, V2SessionCatalog}
 import org.apache.spark.sql.execution.streaming.ResolveWriteToStream
 import org.apache.spark.sql.expressions.UserDefinedAggregateFunction
-import org.apache.spark.sql.execution.ctemv.{CTEMVBackgroundWriter, CTEMVPersistentRegistry, CTEMVRegistry, CTEMVRewriter}
+import org.apache.spark.sql.execution.ctemv.{CTEMVBackgroundWriter, CTEMVEntry, CTEMVPersistentRegistry, CTEMVRegistry, CTEMVRewriter}
 import org.apache.spark.sql.util.ExecutionListenerManager
 
 /**
@@ -394,14 +394,9 @@ abstract class BaseSessionStateBuilder(
     new StreamingQueryManager(session, conf)
 
   /**
-   * Per-session registry tracking which CTE bodies have been materialized into Spark's
-   * in-memory cache. Shared across listener invocations for the same session.
-   */
-  protected lazy val cteMVRegistry: CTEMVRegistry = new CTEMVRegistry()
-
-  /**
    * Cross-session, file-backed registry for Parquet-persisted CTE materialized views
    * (Phase 2). Created only when `spark.sql.cte.mv.storePath` is configured.
+   * Declared before [[cteMVRegistry]] so that the warm-up can access it.
    */
   protected lazy val cteMVPersistentRegistry: Option[CTEMVPersistentRegistry] = {
     conf.getConf(SQLConf.CTE_MV_STORE_PATH).map { storePath =>
@@ -409,6 +404,31 @@ abstract class BaseSessionStateBuilder(
         SessionState.newHadoopConf(session.sparkContext.hadoopConfiguration, conf),
         storePath)
     }
+  }
+
+  /**
+   * Per-session registry tracking which CTE bodies have been materialized into Spark's
+   * in-memory cache. Shared across listener invocations for the same session.
+   *
+   * Phase 4: On creation the registry is pre-populated ("warmed up") from the persistent
+   * registry so that a session that starts after a prior session already materialized a CTE
+   * will not re-materialize the same CTE body again unnecessarily.
+   */
+  protected lazy val cteMVRegistry: CTEMVRegistry = {
+    val registry = new CTEMVRegistry()
+    if (conf.getConf(SQLConf.CTE_MV_ENABLED)) {
+      cteMVPersistentRegistry.foreach { pr =>
+        pr.allEntries().foreach { entry =>
+          val ttl = conf.getConf(SQLConf.CTE_MV_TTL_SECONDS)
+          val ageMs = System.currentTimeMillis() - entry.createdAt
+          if (ageMs < ttl * 1000L) {
+            registry.register(entry.fingerprint,
+              CTEMVEntry(entry.fingerprint, entry.globalViewName, entry.createdAt))
+          }
+        }
+      }
+    }
+    registry
   }
 
   /**

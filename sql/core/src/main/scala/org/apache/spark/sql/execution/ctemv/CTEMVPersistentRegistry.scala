@@ -72,6 +72,15 @@ class CTEMVPersistentRegistry(hadoopConf: Configuration, storePath: String)
     writeEntries(existing :+ entry)
   }
 
+  /**
+   * Removes the entry with the given fingerprint, if present.
+   * No-op if the fingerprint is not found.
+   */
+  def remove(fp: String): Unit = synchronized {
+    val remaining = allEntries().filterNot(_.fingerprint == fp)
+    writeEntries(remaining)
+  }
+
   /** Returns all entries currently persisted (reads from disk every time). */
   def allEntries(): Seq[CTEMVPersistentEntry] = {
     try {

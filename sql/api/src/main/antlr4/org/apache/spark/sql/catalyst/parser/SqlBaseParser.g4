@@ -320,6 +320,9 @@ statement
     | COMMENT ON namespace identifierReference IS
         comment                                                        #commentNamespace
     | COMMENT ON TABLE identifierReference IS comment                  #commentTable
+    | SHOW CTE MATERIALIZED VIEWS                                      #showCteMvs
+    | REFRESH CTE MATERIALIZED VIEW name=stringLit                     #refreshCteMv
+    | DROP CTE MATERIALIZED VIEW (IF EXISTS)? name=stringLit          #dropCteMv
     | REFRESH TABLE identifierReference                                #refreshTable
     | REFRESH FUNCTION identifierReference                             #refreshFunction
     | REFRESH (stringLit | .*?)                                        #refreshResource
@@ -1644,6 +1647,7 @@ ansiNonReserved
     | CONTAINS
     | CONTINUE
     | COST
+    | CTE
     | CUBE
     | CURRENT
     | DATA
@@ -1748,6 +1752,7 @@ ansiNonReserved
     | MACRO
     | MAP
     | MATCHED
+    | MATERIALIZED
     | MERGE
     | MICROSECOND
     | MICROSECONDS
@@ -1993,6 +1998,7 @@ nonReserved
     | CONTINUE
     | COST
     | CREATE
+    | CTE
     | CUBE
     | CURRENT
     | CURRENT_DATE
@@ -2120,6 +2126,7 @@ nonReserved
     | MACRO
     | MAP
     | MATCHED
+    | MATERIALIZED
     | MERGE
     | MICROSECOND
     | MICROSECONDS

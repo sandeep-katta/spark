@@ -36,6 +36,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.util.DateTimeConstants
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryParsingErrors}
 import org.apache.spark.sql.execution.command._
+import org.apache.spark.sql.execution.ctemv.{DropCteMvCommand, RefreshCteMvCommand, ShowCteMvsCommand}
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.internal.{HiveSerDe, SQLConf, VariableSubstitution}
 import org.apache.spark.sql.internal.StaticSQLConf.CATALOG_IMPLEMENTATION
@@ -246,6 +247,23 @@ class SparkSqlAstBuilder extends AstBuilder {
    */
   override def visitClearCache(ctx: ClearCacheContext): LogicalPlan = withOrigin(ctx) {
     ClearCacheCommand
+  }
+
+  /** SHOW CTE MATERIALIZED VIEWS */
+  override def visitShowCteMvs(ctx: ShowCteMvsContext): LogicalPlan = withOrigin(ctx) {
+    ShowCteMvsCommand
+  }
+
+  /** REFRESH CTE MATERIALIZED VIEW <name> */
+  override def visitRefreshCteMv(ctx: RefreshCteMvContext): LogicalPlan = withOrigin(ctx) {
+    RefreshCteMvCommand(string(visitStringLit(ctx.name)))
+  }
+
+  /** DROP CTE MATERIALIZED VIEW [IF EXISTS] <name> */
+  override def visitDropCteMv(ctx: DropCteMvContext): LogicalPlan = withOrigin(ctx) {
+    DropCteMvCommand(
+      name     = string(visitStringLit(ctx.name)),
+      ifExists = ctx.EXISTS() != null)
   }
 
   /**
