@@ -4556,6 +4556,44 @@ object SQLConf {
     .booleanConf
     .createWithDefault(false)
 
+  val CTE_MV_ENABLED = buildConf("spark.sql.cte.mv.enabled")
+    .doc("When true, eligible CTE definitions are asynchronously materialized into " +
+      "Spark's in-memory cache after query execution. Subsequent queries with " +
+      "structurally identical CTE bodies will read from cache instead of recomputing.")
+    .version("4.0.2")
+    .booleanConf
+    .createWithDefault(false)
+
+  val CTE_MV_VIEW_PREFIX = buildConf("spark.sql.cte.mv.viewPrefix")
+    .doc("Prefix for temp view names created by the CTE materialization feature.")
+    .version("4.0.2")
+    .stringConf
+    .createWithDefault("__cte_mv")
+
+  val CTE_MV_PERSISTENCE_MODE = buildConf("spark.sql.cte.mv.persistenceMode")
+    .doc("Persistence mode for CTE materialized views. 'memory' (default) uses Spark's " +
+      "in-memory cache per session. 'parquet' writes CTE bodies to durable Parquet files " +
+      "under spark.sql.cte.mv.storePath, enabling cross-session reuse.")
+    .version("4.0.2")
+    .stringConf
+    .transform(_.toLowerCase(java.util.Locale.ROOT))
+    .checkValues(Set("memory", "parquet"))
+    .createWithDefault("memory")
+
+  val CTE_MV_STORE_PATH = buildConf("spark.sql.cte.mv.storePath")
+    .doc("Filesystem path (local or HDFS) where Parquet-backed CTE materialized views are " +
+      "stored. Required when spark.sql.cte.mv.persistenceMode is 'parquet'.")
+    .version("4.0.2")
+    .stringConf
+    .createOptional
+
+  val CTE_MV_TTL_SECONDS = buildConf("spark.sql.cte.mv.ttlSeconds")
+    .doc("Time-to-live in seconds for Parquet-backed CTE materialized views. Views older " +
+      "than this will not be reused and will be eligible for re-materialization.")
+    .version("4.0.2")
+    .longConf
+    .createWithDefault(3600L)
+
   val LEGACY_TIME_PARSER_POLICY = buildConf(SqlApiConfHelper.LEGACY_TIME_PARSER_POLICY_KEY)
     .internal()
     .doc("When LEGACY, java.text.SimpleDateFormat is used for formatting and parsing " +

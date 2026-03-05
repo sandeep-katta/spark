@@ -39,6 +39,7 @@ import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.{TableCapabilityCheck, V2SessionCatalog}
 import org.apache.spark.sql.execution.streaming.ResolveWriteToStream
 import org.apache.spark.sql.expressions.UserDefinedAggregateFunction
+import org.apache.spark.sql.execution.ctemv.{CTEMVBackgroundWriter, CTEMVPersistentRegistry, CTEMVRegistry, CTEMVRewriter}
 import org.apache.spark.sql.util.ExecutionListenerManager
 
 /**
@@ -285,6 +286,13 @@ abstract class BaseSessionStateBuilder(
    * Note: this depends on `catalog` and `experimentalMethods` fields.
    */
   protected def optimizer: Optimizer = {
+    // Capture Phase 2 state eagerly so the optimizer can reference it without capturing `this`.
+    val cteMVRewriterOpt: Option[CTEMVRewriter] =
+      if (conf.getConf(SQLConf.CTE_MV_ENABLED) &&
+          conf.getConf(SQLConf.CTE_MV_PERSISTENCE_MODE) == "parquet") {
+        cteMVPersistentRegistry.map(pr => new CTEMVRewriter(session, pr))
+      } else None
+
     new SparkOptimizer(catalogManager, catalog, experimentalMethods) {
       override def earlyScanPushDownRules: Seq[Rule[LogicalPlan]] =
         super.earlyScanPushDownRules ++ customEarlyScanPushDownRules
@@ -294,6 +302,15 @@ abstract class BaseSessionStateBuilder(
 
       override def extendedOperatorOptimizationRules: Seq[Rule[LogicalPlan]] =
         super.extendedOperatorOptimizationRules ++ customOperatorOptimizationRules
+
+      /**
+       * Inject [[CTEMVRewriter]] before all other optimizer batches so that Parquet-backed
+       * CTE materialized views are substituted before "Inline CTE" runs. This way InlineCTE
+       * sees zero remaining refs for replaced defs and drops them cleanly.
+       */
+      override def preOptimizationBatches: Seq[Batch] =
+        cteMVRewriterOpt.toSeq.map(r => Batch("Rewrite CTE with Parquet MV", Once, r)) ++
+          super.preOptimizationBatches
     }
   }
 
@@ -377,14 +394,38 @@ abstract class BaseSessionStateBuilder(
     new StreamingQueryManager(session, conf)
 
   /**
+   * Per-session registry tracking which CTE bodies have been materialized into Spark's
+   * in-memory cache. Shared across listener invocations for the same session.
+   */
+  protected lazy val cteMVRegistry: CTEMVRegistry = new CTEMVRegistry()
+
+  /**
+   * Cross-session, file-backed registry for Parquet-persisted CTE materialized views
+   * (Phase 2). Created only when `spark.sql.cte.mv.storePath` is configured.
+   */
+  protected lazy val cteMVPersistentRegistry: Option[CTEMVPersistentRegistry] = {
+    conf.getConf(SQLConf.CTE_MV_STORE_PATH).map { storePath =>
+      new CTEMVPersistentRegistry(
+        SessionState.newHadoopConf(session.sparkContext.hadoopConfiguration, conf),
+        storePath)
+    }
+  }
+
+  /**
    * An interface to register custom [[org.apache.spark.sql.util.QueryExecutionListener]]s
    * that listen for execution metrics.
    *
    * This gets cloned from parent if available, otherwise a new instance is created.
+   * When CTE materialized views are enabled, the [[CTEMVBackgroundWriter]] listener is
+   * automatically registered to asynchronously cache eligible CTE bodies after execution.
    */
   protected def listenerManager: ExecutionListenerManager = {
-    parentState.map(_.listenerManager.clone(session, conf)).getOrElse(
+    val lm = parentState.map(_.listenerManager.clone(session, conf)).getOrElse(
       new ExecutionListenerManager(session, conf, loadExtensions = true))
+    if (conf.getConf(SQLConf.CTE_MV_ENABLED)) {
+      lm.register(new CTEMVBackgroundWriter(session, cteMVRegistry, cteMVPersistentRegistry))
+    }
+    lm
   }
 
   /**
